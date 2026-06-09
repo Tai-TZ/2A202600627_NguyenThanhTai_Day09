@@ -6,6 +6,7 @@ Sends a legal question to the Customer Agent and prints the response.
 import asyncio
 import os
 import sys
+import time
 
 import httpx
 from dotenv import load_dotenv
@@ -60,8 +61,13 @@ async def main() -> None:
             params=MSP(message=message),
         )
 
+        fast = os.getenv("USE_FAST_DELEGATE", "true").lower() == "true"
+        keyword = os.getenv("USE_KEYWORD_ROUTING", "true").lower() == "true"
+        print(f"Optimizations: fast_delegate={fast}, keyword_routing={keyword}")
         print("Sending request (this may take 30-60s while agents chain)...\n")
+        start_time = time.perf_counter()
         response = await client.send_message(request)
+        latency = time.perf_counter() - start_time
 
         # Parse response
         result_text = ""
@@ -88,9 +94,11 @@ async def main() -> None:
             print("=" * 60)
             print(result_text)
             print("=" * 60)
+            print(f"\nLatency: {latency:.2f} giây")
         else:
             print("No text response received. Raw response:")
             print(response)
+            print(f"\nLatency: {latency:.2f} giây")
 
 
 if __name__ == "__main__":

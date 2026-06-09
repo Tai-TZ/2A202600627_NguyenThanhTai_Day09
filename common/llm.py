@@ -9,10 +9,14 @@ import os
 from langchain_openai import ChatOpenAI
 
 
-def get_llm() -> ChatOpenAI:
+def get_llm(*, max_tokens: int | None = 800) -> ChatOpenAI:
     """Return a ChatOpenAI client pointed at OpenRouter."""
-    return ChatOpenAI(
-        model=os.getenv("OPENROUTER_MODEL", "anthropic/claude-sonnet-4-5"),
-        openai_api_key=os.getenv("OPENROUTER_API_KEY"),
-        openai_api_base="https://openrouter.ai/api/v1",
-    )
+    kwargs: dict = {
+        "model": os.getenv("OPENROUTER_MODEL", "anthropic/claude-sonnet-4-5"),
+        "openai_api_key": os.getenv("OPENROUTER_API_KEY"),
+        "openai_api_base": "https://openrouter.ai/api/v1",
+        "temperature": 0.3,
+    }
+    if max_tokens is not None:
+        kwargs["max_tokens"] = max_tokens
+    return ChatOpenAI(**kwargs)

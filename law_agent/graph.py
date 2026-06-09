@@ -11,13 +11,18 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import Annotated, TypedDict
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.constants import Send
 from langgraph.graph import END, StateGraph
 
+from common.agent_errors import AgentUnavailableError, unavailable_section
 from common.llm import get_llm
+from common.routing import detect_specialists
+
+USE_KEYWORD_ROUTING = os.getenv("USE_KEYWORD_ROUTING", "true").lower() == "true"
 
 logger = logging.getLogger(__name__)
 
@@ -69,15 +74,25 @@ async def analyze_law(state: LawState) -> dict:
 
 
 async def check_routing(state: LawState) -> dict:
-    """Determine whether tax and/or compliance sub-agents are needed.
-
-    Returns updated state flags so the routing function can read them.
-    If delegation depth is already at the max, skip further delegation.
-    """
+    """Determine whether tax and/or compliance sub-agents are needed."""
     depth = state.get("delegation_depth", 0)
     if depth >= MAX_DELEGATION_DEPTH:
         logger.info("Max delegation depth reached (%d); skipping sub-agents", depth)
         return {"needs_tax": False, "needs_compliance": False}
+
+    if USE_KEYWORD_ROUTING:
+        flags = detect_specialists(state["question"])
+        needs_tax = flags["needs_tax"]
+        needs_compliance = flags["needs_compliance"]
+        if not needs_tax and not needs_compliance:
+            needs_tax = True
+            needs_compliance = True
+        logger.info(
+            "Keyword routing: needs_tax=%s needs_compliance=%s",
+            needs_tax,
+            needs_compliance,
+        )
+        return {"needs_tax": needs_tax, "needs_compliance": needs_compliance}
 
     llm = get_llm()
     messages = [
@@ -96,7 +111,6 @@ async def check_routing(state: LawState) -> dict:
     result = await llm.ainvoke(messages)
     raw = result.content.strip()
 
-    # Strip markdown code fences if present
     if raw.startswith("```"):
         raw = raw.split("```")[1]
         if raw.startswith("json"):
@@ -148,9 +162,12 @@ async def call_tax(state: LawState) -> dict:
         )
         logger.info("Tax Agent returned %d chars", len(result))
         return {"tax_result": result}
+    except AgentUnavailableError as exc:
+        logger.warning("call_tax unavailable: %s", exc)
+        return {"tax_result": unavailable_section("Tax", exc.reason)}
     except Exception as exc:
         logger.exception("call_tax failed: %s", exc)
-        return {"tax_result": f"[Tax analysis unavailable: {exc}]"}
+        return {"tax_result": unavailable_section("Tax", str(exc))}
 
 
 async def call_compliance(state: LawState) -> dict:
@@ -169,9 +186,12 @@ async def call_compliance(state: LawState) -> dict:
         )
         logger.info("Compliance Agent returned %d chars", len(result))
         return {"compliance_result": result}
+    except AgentUnavailableError as exc:
+        logger.warning("call_compliance unavailable: %s", exc)
+        return {"compliance_result": unavailable_section("Compliance", exc.reason)}
     except Exception as exc:
         logger.exception("call_compliance failed: %s", exc)
-        return {"compliance_result": f"[Compliance analysis unavailable: {exc}]"}
+        return {"compliance_result": unavailable_section("Compliance", str(exc))}
 
 
 async def aggregate(state: LawState) -> dict:
@@ -192,10 +212,14 @@ async def aggregate(state: LawState) -> dict:
         SystemMessage(
             content=(
                 "You are a senior legal counsel synthesising specialist analyses into a "
-                "comprehensive, well-structured response for the client. Combine the following "
-                "analyses into a cohesive answer with clear sections. Avoid redundancy. "
-                "End with a brief disclaimer that the analysis is educational and the client "
-                "should consult licensed attorneys for their specific situation."
+                "comprehensive, well-structured response for the client.\n\n"
+                "REQUIRED OUTPUT FORMAT — keep these exact markdown headers:\n"
+                "## Legal Analysis\n"
+                "## Tax Analysis\n"
+                "## Regulatory Compliance Analysis\n\n"
+                "Under each header, write the synthesised content for that domain. "
+                "If a specialist was unavailable, keep the header and note it briefly. "
+                "Avoid redundancy. End with a one-sentence educational disclaimer."
             )
         ),
         HumanMessage(content=combined),

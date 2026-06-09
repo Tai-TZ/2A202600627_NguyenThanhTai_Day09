@@ -7,6 +7,10 @@ dependencies = [
     "langgraph>=0.4.1",
     "langchain-openai>=0.3.0",
     "langchain-core>=0.3.0",
+    "langchain-text-splitters>=0.2.0",
+    "sentence-transformers>=2.2.0",
+    "rank-bm25>=0.2.2",
+    "numpy>=1.26.0",
     "fastapi>=0.115.0",
     "uvicorn>=0.34.0",
     "httpx>=0.28.0",
@@ -24,9 +28,11 @@ build-backend = "hatchling.build"
 packages = [
     "registry",
     "common",
+    "gateway",
     "customer_agent",
     "law_agent",
     "tax_agent",
     "compliance_agent",
     "stages",
+    "Lab_Assignment",
 ]

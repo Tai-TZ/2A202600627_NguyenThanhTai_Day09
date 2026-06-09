@@ -46,6 +46,7 @@ class LawAgentExecutor(AgentExecutor):
                     "trace_id": trace_id,
                     "delegation_depth": depth,
                     "law_analysis": "",
+                    "needs_clarification": False,
                     "needs_tax": False,
                     "needs_compliance": False,
                     "tax_result": "",

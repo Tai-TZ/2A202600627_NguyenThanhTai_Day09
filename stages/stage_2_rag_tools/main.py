@@ -16,72 +16,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import tool
 
 from common.llm import get_llm
-
-# ---------------------------------------------------------------------------
-# Simulated legal knowledge base (in production, this would be a vector store)
-# ---------------------------------------------------------------------------
-
-LEGAL_KNOWLEDGE = [
-    {
-        "id": "ucc_breach",
-        "keywords": ["breach", "contract", "remedies", "damages", "ucc"],
-        "text": (
-            "Under the Uniform Commercial Code (UCC) Article 2, remedies for breach of contract "
-            "include: (1) expectation damages — placing the non-breaching party in the position "
-            "they would have been in had the contract been performed; (2) consequential damages "
-            "for foreseeable losses (Hadley v. Baxendale, 1854); (3) specific performance when "
-            "the subject matter is unique; (4) cover damages — the cost of obtaining substitute "
-            "performance. The statute of limitations is typically 4 years (UCC § 2-725)."
-        ),
-    },
-    {
-        "id": "nda_trade_secret",
-        "keywords": ["nda", "non-disclosure", "confidential", "trade secret", "agreement"],
-        "text": (
-            "NDA breaches may trigger both contractual and statutory liability. Under the Defend "
-            "Trade Secrets Act (DTSA, 18 U.S.C. § 1836), misappropriation of trade secrets can "
-            "result in: (1) injunctive relief; (2) actual damages plus unjust enrichment; "
-            "(3) exemplary damages up to 2x actual damages for willful misappropriation; "
-            "(4) attorney's fees. State Uniform Trade Secrets Act (UTSA) versions provide "
-            "additional remedies. Criminal prosecution is possible under the Economic Espionage "
-            "Act (18 U.S.C. § 1832) with penalties up to $5M for individuals."
-        ),
-    },
-    {
-        "id": "dtsa_details",
-        "keywords": ["dtsa", "federal", "trade secret", "defend", "statute"],
-        "text": (
-            "The Defend Trade Secrets Act (2016) created a federal private cause of action for "
-            "trade secret misappropriation. Key provisions: (1) ex parte seizure orders in "
-            "extraordinary circumstances; (2) 3-year statute of limitations; (3) immunity for "
-            "whistleblower disclosures to government officials; (4) employers must notify "
-            "employees of whistleblower immunity in any NDA or employment agreement."
-        ),
-    },
-    {
-        "id": "liquidated_damages",
-        "keywords": ["liquidated", "damages", "penalty", "clause", "contract", "nda"],
-        "text": (
-            "Liquidated damages clauses in NDAs are enforceable if: (1) actual damages would be "
-            "difficult to calculate at the time of contracting; (2) the stipulated amount is a "
-            "reasonable estimate of anticipated harm. Courts will void clauses that function as "
-            "penalties (Restatement (Second) of Contracts § 356). Typical NDA liquidated damages "
-            "range from $10,000 to $500,000 depending on the nature of the confidential information."
-        ),
-    },
-    {
-        "id": "injunctive_relief",
-        "keywords": ["injunction", "restraining", "order", "equitable", "nda", "breach"],
-        "text": (
-            "Courts routinely grant temporary restraining orders (TROs) and preliminary injunctions "
-            "for NDA breaches because: (1) confidential information, once disclosed, cannot be "
-            "'un-disclosed' — making monetary damages inadequate; (2) irreparable harm is presumed "
-            "for trade secret misappropriation in many jurisdictions. The movant must show "
-            "likelihood of success on the merits, irreparable harm, balance of equities, and "
-            "public interest (Winter v. Natural Resources Defense Council, 2008)."
-        ),
-    },
-]
+from common.rag.search import search_legal_knowledge as rag_search
 
 
 # ---------------------------------------------------------------------------
@@ -90,21 +25,23 @@ LEGAL_KNOWLEDGE = [
 
 @tool
 def search_legal_database(query: str) -> str:
-    """Search the legal knowledge base for relevant statutes, case law, and legal principles."""
-    query_words = set(query.lower().split())
-    scored = []
-    for entry in LEGAL_KNOWLEDGE:
-        overlap = len(query_words & set(entry["keywords"]))
-        if overlap > 0:
-            scored.append((overlap, entry))
-    scored.sort(key=lambda x: x[0], reverse=True)
-    top = scored[:2]
-    if not top:
-        return "No relevant legal sources found for this query."
-    results = []
-    for _, entry in top:
-        results.append(f"[{entry['id']}] {entry['text']}")
-    return "\n\n".join(results)
+    """Search the legal knowledge base using hybrid RAG (semantic + BM25 from Day08)."""
+    return rag_search(query)
+
+
+@tool
+def check_statute_of_limitations(case_type: str) -> str:
+    """Kiểm tra thời hiệu khởi kiện theo loại vụ án.
+
+    Args:
+        case_type: Loại vụ án (contract, tort, property)
+    """
+    limits = {
+        "contract": "4 năm (UCC § 2-725)",
+        "tort": "2-3 năm tùy bang",
+        "property": "5 năm",
+    }
+    return limits.get(case_type.lower(), "Không xác định")
 
 
 @tool
@@ -135,7 +72,7 @@ def calculate_damages(breach_type: str, contract_value: float) -> str:
     )
 
 
-TOOLS = [search_legal_database, calculate_damages]
+TOOLS = [search_legal_database, check_statute_of_limitations, calculate_damages]
 
 QUESTION = "What are the legal consequences if a company breaches a non-disclosure agreement?"
 

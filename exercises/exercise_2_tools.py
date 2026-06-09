@@ -14,48 +14,35 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import tool
 
 from common.llm import get_llm
-
-# Knowledge base
-LEGAL_KNOWLEDGE = [
-    {
-        "id": "ucc_breach",
-        "keywords": ["breach", "contract", "remedies", "damages", "ucc"],
-        "text": (
-            "Under the Uniform Commercial Code (UCC) Article 2, remedies for breach of contract "
-            "include: (1) expectation damages; (2) consequential damages; (3) specific performance; "
-            "(4) cover damages. Statute of limitations is typically 4 years (UCC § 2-725)."
-        ),
-    },
-    # TODO: Thêm entry về luật lao động Việt Nam
-    # Gợi ý: id="labor_law", keywords=["lao động", "sa thải", ...], text="..."
-]
+from common.rag.search import search_legal_knowledge as rag_search
 
 
 @tool
 def search_legal_knowledge(query: str) -> str:
-    """Tìm kiếm trong knowledge base pháp lý."""
-    query_lower = query.lower()
-    for entry in LEGAL_KNOWLEDGE:
-        if any(kw in query_lower for kw in entry["keywords"]):
-            return f"[{entry['id']}] {entry['text']}"
-    return "Không tìm thấy thông tin liên quan."
+    """Tìm kiếm trong knowledge base pháp lý (hybrid RAG từ Day08)."""
+    return rag_search(query)
 
 
-# TODO: Tạo tool check_statute_of_limitations
-# Gợi ý: nhận case_type (str), trả về thời hiệu khởi kiện
-# @tool
-# def check_statute_of_limitations(case_type: str) -> str:
-#     """Kiểm tra thời hiệu khởi kiện."""
-#     # YOUR CODE HERE
-#     pass
+@tool
+def check_statute_of_limitations(case_type: str) -> str:
+    """Kiểm tra thời hiệu khởi kiện theo loại vụ án.
+
+    Args:
+        case_type: Loại vụ án (contract, tort, property)
+    """
+    limits = {
+        "contract": "4 năm (UCC § 2-725)",
+        "tort": "2-3 năm tùy bang",
+        "property": "5 năm",
+    }
+    return limits.get(case_type.lower(), "Không xác định")
 
 
 async def main():
     load_dotenv()
     llm = get_llm()
     
-    # TODO: Thêm tool mới vào danh sách
-    tools = [search_legal_knowledge]  # Thêm check_statute_of_limitations vào đây
+    tools = [search_legal_knowledge, check_statute_of_limitations]
     llm_with_tools = llm.bind_tools(tools)
     
     question = "Thời hiệu khởi kiện vụ vi phạm hợp đồng là bao lâu?"
@@ -79,7 +66,8 @@ async def main():
             
             if tool_call["name"] == "search_legal_knowledge":
                 tool_result = search_legal_knowledge.invoke(tool_call["args"])
-            # TODO: Thêm xử lý cho check_statute_of_limitations
+            elif tool_call["name"] == "check_statute_of_limitations":
+                tool_result = check_statute_of_limitations.invoke(tool_call["args"])
             
             if tool_result:
                 messages.append(ToolMessage(content=tool_result, tool_call_id=tool_call["id"]))

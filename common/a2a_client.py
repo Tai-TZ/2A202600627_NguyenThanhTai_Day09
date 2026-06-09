@@ -11,6 +11,8 @@ from uuid import uuid4
 
 import httpx
 
+from common.agent_errors import AgentUnavailableError, wrap_connection_error
+
 from a2a.client import A2AClient
 from a2a.types import (
     AgentCard,
@@ -44,42 +46,51 @@ async def delegate(
     Returns:
         The agent's text response, or an empty string if none could be extracted.
     """
-    async with httpx.AsyncClient(timeout=300.0) as http_client:
-        # Fetch agent card
-        card_url = f"{endpoint}/.well-known/agent.json"
-        card_resp = await http_client.get(card_url)
-        card_resp.raise_for_status()
-        agent_card = AgentCard.model_validate(card_resp.json())
+    agent_name = endpoint
+    try:
+        async with httpx.AsyncClient(timeout=300.0) as http_client:
+            card_url = f"{endpoint}/.well-known/agent.json"
+            try:
+                card_resp = await http_client.get(card_url)
+                card_resp.raise_for_status()
+            except Exception as exc:
+                raise wrap_connection_error("target agent", endpoint, exc) from exc
 
-        # Build deprecated (legacy) A2AClient — straightforward for send_message
-        client = A2AClient(httpx_client=http_client, agent_card=agent_card)
+            agent_card = AgentCard.model_validate(card_resp.json())
+            agent_name = agent_card.name
+            client = A2AClient(httpx_client=http_client, agent_card=agent_card)
 
-        # Build message with trace metadata
-        message = Message(
-            role=Role.user,
-            parts=[Part(root=TextPart(text=question))],
-            message_id=str(uuid4()),
-            context_id=context_id,
-            metadata={
-                "trace_id": trace_id,
-                "context_id": context_id,
-                "delegation_depth": depth,
-            },
-        )
+            message = Message(
+                role=Role.user,
+                parts=[Part(root=TextPart(text=question))],
+                message_id=str(uuid4()),
+                context_id=context_id,
+                metadata={
+                    "trace_id": trace_id,
+                    "context_id": context_id,
+                    "delegation_depth": depth,
+                },
+            )
 
-        request = SendMessageRequest(
-            id=str(uuid4()),
-            params=MessageSendParams(message=message),
-        )
+            request = SendMessageRequest(
+                id=str(uuid4()),
+                params=MessageSendParams(message=message),
+            )
 
-        logger.debug(
-            "Delegating to %s (depth=%d, trace=%s)", endpoint, depth, trace_id
-        )
+            logger.debug(
+                "Delegating to %s (depth=%d, trace=%s)", endpoint, depth, trace_id
+            )
 
-        response = await client.send_message(request)
+            try:
+                response = await client.send_message(request)
+            except Exception as exc:
+                raise wrap_connection_error(agent_name, endpoint, exc) from exc
 
-        # Extract text from SendMessageResponse
-        return _extract_text(response)
+            return _extract_text(response)
+    except AgentUnavailableError:
+        raise
+    except Exception as exc:
+        raise wrap_connection_error(agent_name, endpoint, exc) from exc
 
 
 def _extract_text(response: object) -> str:
