@@ -3,7 +3,6 @@
 **cache**
 .claude
 **SOLUTION**
-!Lab-Solution.md
 data/index/*.pkl
 ui/node_modules
 _ui_source
